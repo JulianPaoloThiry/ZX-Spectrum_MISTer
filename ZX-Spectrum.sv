@@ -48,8 +48,35 @@ module emu
 	output        VGA_VS,
 	output        VGA_DE,    // = ~(VBlank | HBlank)
 	output        VGA_F1,
-	output  [1:0] VGA_SL,
+	output [1:0]  VGA_SL,
 	output        VGA_SCALER, // Force VGA scaler
+
+`ifdef USE_FB
+	// Use framebuffer in DDRAM (USE_FB=1 in qsf)
+	// FB_FORMAT:
+	//    [2:0] : 011=8bpp(palette) 100=16bpp 101=24bpp 110=32bpp
+	//    [3]   : 0=16bits 565 1=16bits 1555
+	//    [4]   : 0=RGB  1=BGR (for 16/24/32 modes)
+	//
+	// FB_STRIDE either 0 (rounded to 256 bytes) or multiple of pixel size (in bytes)
+	output        FB_EN,
+	output  [4:0] FB_FORMAT,
+	output [11:0] FB_WIDTH,
+	output [11:0] FB_HEIGHT,
+	output [31:0] FB_BASE,
+	output [13:0] FB_STRIDE,
+	input         FB_VBL,
+	input         FB_LL,
+	output        FB_FORCE_BLANK,
+
+	// Palette control for 8bit modes.
+	// Ignored for other video modes.
+	output        FB_PAL_CLK,
+	output  [7:0] FB_PAL_ADDR,
+	output [23:0] FB_PAL_DOUT,
+	input  [23:0] FB_PAL_DIN,
+	output        FB_PAL_WR,
+`endif
 
 	output        LED_USER,  // 1 - ON, 0 - OFF.
 
@@ -80,6 +107,7 @@ module emu
 	output        SD_CS,
 	input         SD_CD,
 
+`ifdef USE_DDRAM
 	//High latency DDR3 RAM interface
 	//Use for non-critical time purposes
 	output        DDRAM_CLK,
@@ -92,7 +120,9 @@ module emu
 	output [63:0] DDRAM_DIN,
 	output  [7:0] DDRAM_BE,
 	output        DDRAM_WE,
+`endif
 
+`ifdef USE_SDRAM
 	//SDRAM interface with lower latency
 	output        SDRAM_CLK,
 	output        SDRAM_CKE,
@@ -105,6 +135,20 @@ module emu
 	output        SDRAM_nCAS,
 	output        SDRAM_nRAS,
 	output        SDRAM_nWE,
+`endif
+
+`ifdef DUAL_SDRAM
+	//Secondary SDRAM
+	input         SDRAM2_EN,
+	output        SDRAM2_CLK,
+	output [12:0] SDRAM2_A,
+	output  [1:0] SDRAM2_BA,
+	inout  [15:0] SDRAM2_DQ,
+	output        SDRAM2_nCS,
+	output        SDRAM2_nCAS,
+	output        SDRAM2_nRAS,
+	output        SDRAM2_nWE,
+`endif
 
 	input         UART_CTS,
 	output        UART_RTS,
@@ -158,7 +202,7 @@ localparam CONF_STR = {
 	"-;",
 	"S0,TRDIMGDSKMGT,Load Disk;",
 	"F2,TAPCSWTZX,Load Tape;",
-	"F4,Z80,Load Snapshot;",
+	"F4,Z80SNA,Load Snapshot;",
 	"-;",
 
 	"P1,Audio & Video;",
@@ -444,7 +488,7 @@ T80pa cpu
 );
 
 always_comb begin
-	casex({nMREQ, tape_dout_en, ~nM1 | nIORQ | nRD, fdd_sel | fdd_sel2 | plus3_fdd, mf3_port, addr[7:0]==8'h1F, portBF, gs_sel, psg_enable, ulap_sel, addr[0]})
+	casex({nMREQ, tape_dout_en, ~nM1 | nIORQ | nRD, fdd_sel | fdd_sel2 | plus3_fdd, mf3_port, addr[5:0]==8'h1F, portBF, gs_sel, psg_enable, ulap_sel, addr[0]})
 		'b01XXXXXXXXX: cpu_din = tape_dout;
 		'b00XXXXXXXXX: cpu_din = ram_dout;
 		'b1X01XXXXXXX: cpu_din = fdd_dout;
@@ -455,7 +499,7 @@ always_comb begin
 		'b1X0000001XX: cpu_din = (addr[14] ? sound_data : 8'hFF);
 		'b1X00000001X: cpu_din = ulap_dout;
 		'b1X000000001: cpu_din = port_ff;
-		'b1X000000000: cpu_din = {1'b1, ~tape_in, 1'b1, key_data[4:0] & joy_kbd};
+		'b1X000000000: cpu_din = {1'b1, ula_tape_in, 1'b1, key_data[4:0] & joy_kbd};
 		'b1X1XXXXXXXX: cpu_din = 8'hFF;
 	endcase
 end
@@ -1127,7 +1171,6 @@ wire  [7:0] tape_dout;
 wire        tape_led;
 wire        tape_active;
 wire        tape_loaded;
-wire        tape_in;
 wire        tape_vin;
 
 smart_tape tape
@@ -1178,7 +1221,8 @@ always @(posedge clk_sys) begin
 	end
 end
 
-assign tape_in = tape_loaded_reg ? tape_vin : tape_adc_act & tape_adc;
+wire tape_in = ~(tape_loaded_reg ? tape_vin : tape_adc_act & tape_adc);
+wire ula_tape_in = tape_in | ear_out;
 
 wire tape_adc, tape_adc_act;
 ltc2308_tape ltc2308_tape
@@ -1240,11 +1284,12 @@ snap_loader #(ARCH_ZX48, ARCH_ZX128, ARCH_ZX3, ARCH_P128) snap_loader
 (
 	.clk_sys(clk_sys),
 
-	.ioctl_download(ioctl_download && ioctl_index == 4),
+	.ioctl_download(ioctl_download && ioctl_index[4:0] == 4),
 	.ioctl_addr(ioctl_addr),
 	.ioctl_data(ioctl_dout),
 	.ioctl_wr(ioctl_wr),
 	.ioctl_wait(ioctl_wait),
+	.snap_sna(|ioctl_index[7:6]),
 
 	.ram_ready(ram_ready),
 
