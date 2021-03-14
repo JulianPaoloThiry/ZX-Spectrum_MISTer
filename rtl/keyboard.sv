@@ -291,7 +291,7 @@ always @(posedge clk_sys) begin
 			8'h7B: s['h50] <= key_down; // Num-
 			8'h7C: s['h20] <= key_down; // Num*
 			8'h76: s['h19] <= key_down; // Esc
-			
+
 			// Track extended equivalents separately
 			8'h11: if (extended) begin
 					s['h56] <= key_down; // RAlt
@@ -343,7 +343,7 @@ always @(posedge clk_sys) begin
 			8'h7A: if (extended) begin
 					s['h5F] <= key_down; // PgDn
 				end
-			
+
 			// Symbol keys. These send the original code when pressed alone and
 			// a virtual key when pressed with Shift. When released, both the
 			// original and virtual key are cleared. This ensures that changing
@@ -457,15 +457,15 @@ always @(posedge clk_sys) begin
 						s['h08] <= 0;
 					end
 				end
-				
+
 			// When an extended virtual key is pressed, only set the state if the
 			// actual key is still pressed. This prevents getting the virtual key
 			// stuck down since a "virtual key up" does not exist for these.
 			8'h48,8'h40: if (s['h54]) s[code] <= key_down; // {[
 			8'h4F,8'h47: if (s['h5B]) s[code] <= key_down; // }]
-			8'h51,8'h57: if (s['h5D]) s[code] <= key_down; // |\
+			8'h51,8'h57: if (s['h5D]) s[code] <= key_down; // |\ 
 			8'h02,8'h08: if (s['h0E]) s[code] <= key_down; // ~`
-					
+
 			default: ;
 		endcase
 	end else if (input_strobe & rs) begin // Recreated ZX Spectrum
@@ -612,7 +612,7 @@ always @(posedge clk_sys) begin
 								end
 							9'h61: begin
 									auto_pos <= 51;
-									auto[53] <= {2'b10, 8'h5D - 8'h06};        // \
+									auto[53] <= {2'b10, 8'h5D - 8'h06};        // \ 
 								end
 							10'h25D: begin
 									auto_pos <= 51;
