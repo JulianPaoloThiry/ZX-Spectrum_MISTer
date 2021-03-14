@@ -38,8 +38,9 @@ module emu
 	output        CE_PIXEL,
 
 	//Video aspect ratio for HDMI. Most retro systems have ratio 4:3.
-	output [11:0] VIDEO_ARX,
-	output [11:0] VIDEO_ARY,
+	//if VIDEO_ARX[12] or VIDEO_ARY[12] is set then [11:0] contains scaled size instead of aspect ratio.
+	output [12:0] VIDEO_ARX,
+	output [12:0] VIDEO_ARY,
 
 	output  [7:0] VGA_R,
 	output  [7:0] VGA_G,
@@ -50,6 +51,9 @@ module emu
 	output        VGA_F1,
 	output [1:0]  VGA_SL,
 	output        VGA_SCALER, // Force VGA scaler
+
+	input  [11:0] HDMI_WIDTH,
+	input  [11:0] HDMI_HEIGHT,
 
 `ifdef USE_FB
 	// Use framebuffer in DDRAM (USE_FB=1 in qsf)
@@ -182,9 +186,6 @@ assign LED_POWER = 0;
 assign BUTTONS   = 0;
 assign VGA_SCALER= 0;
 
-assign VIDEO_ARX = (!status[5:4]) ? (status[1] ? 8'd16 : 8'd4) : (status[5:4] - 1'd1);
-assign VIDEO_ARY = (!status[5:4]) ? (status[1] ? 8'd9  : 8'd3) : 8'd0;
-
 localparam ARCH_ZX48  = 5'b011_00; // ZX 48
 localparam ARCH_ZX128 = 5'b000_01; // ZX 128/+2
 localparam ARCH_ZX3   = 5'b100_01; // ZX 128 +3
@@ -195,6 +196,13 @@ localparam ARCH_P1024 = 5'b001_10; // Pentagon 1024
 localparam CONF_BDI   = "(BDI)";
 localparam CONF_PLUSD = "(+D) ";
 localparam CONF_PLUS3 = "(+3) ";
+
+// Status Bit Map:
+//              Upper                          Lower
+// 0         1         2         3          4         5         6
+// 01234567890123456789012345678901 23456789012345678901234567890123
+// 0123456789ABCDEFGHIJKLMNOPQRSTUV 0123456789ABCDEFGHIJKLMNOPQRSTUV
+// X XXXXX XXXXXXXXXXXXXXXXXXXXXX
 
 `include "build_id.v"
 localparam CONF_STR = {
@@ -207,9 +215,12 @@ localparam CONF_STR = {
 
 	"P1,Audio & Video;",
 	"P1-;",
-	"P1O1,Video,Original,Wide;",
 	"P1O45,Aspect Ratio,Original,Full Screen,[ARC1],[ARC2];",
 	"P1OFG,Scandoubler Fx,None,HQ2x,CRT 25%,CRT 50%;",
+	"P1-;",
+	"H2d1P1OS,Vertical Crop,No,Yes;",
+	"h2d1P1OST,Vertical Crop,No,270,216;",
+	"P1OQR,Scale,Normal,V-Integer,Narrower HV-Integer,Wider HV-Integer;",
 	"P1-;",
 	"P1OKL,General Sound,512KB,1MB,2MB,Disabled;",
 	"P1O23,Stereo Mix,none,25%,50%,100%;",
@@ -400,7 +411,7 @@ hps_io #(.STRLEN(($size(CONF_STR)>>3)+5)) hps_io
 	.buttons(buttons),
 	.forced_scandoubler(forced_scandoubler),
 	.status(status),
-	.status_menumask({~need_apply}),
+	.status_menumask({en1080p,|vcrop,~need_apply}),
 	.status_set(speed_set|arch_set|snap_hwset),
 	.status_in({status[31:25], speed_set ? speed_req : 3'b000, status[21:13], arch_set ? arch : snap_hwset ? snap_hw : status[12:8], status[7:0]}),
 
@@ -883,7 +894,7 @@ wire       I,R,G,B;
 wire [7:0] ulap_color;
 wire       ula_nWR;
 
-ULA ULA(.*, .nPortRD(), .nPortWR(ula_nWR), .din(cpu_dout), .page_ram(page_ram[2:0]), .wide(status[1]));
+ULA ULA(.*, .nPortRD(), .nPortWR(ula_nWR), .din(cpu_dout), .page_ram(page_ram[2:0]));
 
 wire ce_sys = ce_7mp | (mode512 & ce_7mn);
 reg ce_sys1;
@@ -902,7 +913,7 @@ always @(posedge CLK_VIDEO) begin
 	ce_pix <= ce1;
 end
 
-reg [3:0] Rx, Gx, Bx;
+reg [7:0] Rx, Gx, Bx;
 reg       hs,vs,hbl,vbl;
 always @(posedge CLK_VIDEO) if (ce_pix) begin
 	hs <= HSync;
@@ -912,32 +923,59 @@ always @(posedge CLK_VIDEO) if (ce_pix) begin
 	vbl <= VBlank;
 
 	casex({ulap_ena, ulap_mono})
-		'b0X: {Gx,Rx,Bx} <= {G, {3{I & G}}, R, {3{I & R}}, B, {3{I & B}}};
-		'b10: {Gx,Rx,Bx} <= {ulap_color[7:5], ulap_color[7], ulap_color[4:2], ulap_color[4], ulap_color[1:0], ulap_color[1:0]};
-		'b11: {Gx,Rx,Bx} <= {ulap_color, 4'b0000};
+		'b0X: {Gx,Rx,Bx} <= {G, {3{I & G}}, G, {3{I & G}}, R, {3{I & R}}, R, {3{I & R}}, B, {3{I & B}}, B, {3{I & B}}};
+		'b10: {Gx,Rx,Bx} <= {{2{ulap_color[7:5]}}, ulap_color[7:6], {2{ulap_color[4:2]}}, ulap_color[4:3], {4{ulap_color[1:0]}}};
+		'b11: {Gx,Rx,Bx} <= {3{ulap_color}};
 	endcase
 end
 
-video_mixer #(.LINE_LENGTH(896), .HALF_DEPTH(1), .GAMMA(1)) video_mixer
+reg [9:0] vcrop;
+reg wide;
+always @(posedge CLK_VIDEO) begin
+	vcrop <= 0;
+	wide <= 0;
+	if(HDMI_WIDTH >= (HDMI_HEIGHT + HDMI_HEIGHT[11:1]) && !forced_scandoubler && !scale) begin
+		if(HDMI_HEIGHT == 480)  vcrop <= 240;
+		if(HDMI_HEIGHT == 600)  begin vcrop <= 200; wide <= vcrop_en; end
+		if(HDMI_HEIGHT == 720)  vcrop <= 240;
+		if(HDMI_HEIGHT == 768)  vcrop <= 256;
+		if(HDMI_HEIGHT == 800)  begin vcrop <= 200; wide <= vcrop_en; end
+		if(HDMI_HEIGHT == 1080) vcrop <= status[29] ? 10'd216 : 10'd270;
+		if(HDMI_HEIGHT == 1200) vcrop <= 240;
+	end
+end
+
+reg en1080p;
+always @(posedge CLK_VIDEO) en1080p <= (HDMI_WIDTH == 1920) && (HDMI_HEIGHT == 1080);
+
+wire [1:0] ar = status[5:4];
+wire vcrop_en = en1080p ? |status[29:28] : status[28];
+wire vga_de;
+video_freak video_freak
 (
 	.*,
+	.VGA_DE_IN(vga_de),
+	.ARX((!ar) ? (wide ? 12'd2903 : 12'd3307) : (ar - 1'd1)),
+	.ARY((!ar) ? 12'd2588 : 12'd0),
+	.CROP_SIZE(vcrop_en ? vcrop : 10'd0),
+	.CROP_OFF(0),
+	.SCALE(status[27:26])
+);
 
-	.clk_vid(CLK_VIDEO),
-	.ce_pix(ce_pix),
-	.ce_pix_out(CE_PIXEL),
-
+video_mixer #(.LINE_LENGTH(896), .GAMMA(1)) video_mixer
+(
+	.*,
 	.hq2x(scale == 1),
-	.scanlines(0),
 	.scandoubler(scale || forced_scandoubler),
 
+	.VGA_DE(vga_de),
 	.HSync(hs),
 	.VSync(vs),
 	.HBlank(hbl),
 	.VBlank(vbl),
 	.R(Rx),
 	.G(Gx),
-	.B(Bx),
-	.mono(ulap_ena & ulap_mono)
+	.B(Bx)
 );
 
 assign VGA_SL = {scale==3, scale==2};
