@@ -200,7 +200,7 @@ localparam CONF_PLUS3 = "(+3) ";
 // 0         1         2         3          4         5         6
 // 01234567890123456789012345678901 23456789012345678901234567890123
 // 0123456789ABCDEFGHIJKLMNOPQRSTUV 0123456789ABCDEFGHIJKLMNOPQRSTUV
-// XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX XX
+// XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX XXMM
 
 `include "build_id.v"
 localparam CONF_STR = {
@@ -238,7 +238,7 @@ localparam CONF_STR = {
 
 	"-;",
 	"OHJ,Joystick,Kempston,Sinclair I,Sinclair II,Sinclair I+II,Cursor;",
-	"OQR,Keyboard,US Layout,UK Layout,Rec ZX Spectrum;",
+	"o23,Keyboard,US Layout,UK Layout,Rec ZX Spectrum;",
 	"-;",
 	"O6,Fast Tape Load,On,Off;",
 	"O1,Tape Sound,On,Off;",
@@ -1001,7 +1001,7 @@ end
 wire [11:1] Fn;
 wire  [2:0] mod;
 wire  [4:0] key_data;
-keyboard kbd( .*, .layout(status[27:26]) );
+keyboard kbd( .*, .layout(status[35:34]) );
 
 reg         mouse_sel;
 wire  [7:0] mouse_data;
