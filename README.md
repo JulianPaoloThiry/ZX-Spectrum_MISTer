@@ -1,125 +1,109 @@
 # [ZX Spectrum](https://en.wikipedia.org/wiki/ZX_Spectrum) for MiSTer Platform
 
-Some verilog models from Till Harbaum [Spectrum](https://github.com/mist-devel/mist-board/tree/master/cores/spectrum) core were used in this project.
+The only change in this fork is the keyboard driver:
 
-### Features:
-- Fully functional [ZX Spectrum 48K, 128K, +3](https://en.wikipedia.org/wiki/ZX_Spectrum) and [Pentagon 128](https://en.wikipedia.org/wiki/Pentagon_(computer)) with correct CPU and Video timings.
-- Pentagon 1024K and Profi 1024K memory interfaces.
-- Turbo 7MHz, 14MHz, 28MHz, 56MHz.
-- [ULA+ v1.1](https://sinclair.wiki.zxnet.co.uk/wiki/ULAplus) programmable palettes with extended Timex control.
-- Timex HiColor, HiRes modes.
-- TAP tape format with turbo (direct byte injection) and normal loading.
-- TZX and CSW tape formats with fast(16x) and normal loading.
-- Z80/SNA snapshot loading.
-- [TR-DOS](https://sinclair.wiki.zxnet.co.uk/wiki/TR-DOS_filesystem) (Beta Disk Interface) - TRD(read/write) and SCL(read-only) images.
-- [G+DOS](https://en.wikipedia.org/wiki/%2BD) (MGT +D Disk Interface) and IMG, MGT images (only in non +2A/+3 memory modes).
-- +3 Disk drive usable with +3DOS.
-- DivMMC with ESXDOS.
-- [Multiface 128 and Multiface 3](https://en.wikipedia.org/wiki/Multiface) (in +3 mode) add-on.
-- Memory snapshot save/load in +D and Multiface.
-- Kempston Mouse.
-- Joysticks: Kempston, Sinclair I/II, Cursor
-- [General Sound](https://8bit.yarek.pl/interface/zx.generalsound/index.html) with 512KB-2MB of RAM
-- [Turbosound-FM](http://speccy.info/TurboSound_FM) (dual YM2203 incl. dual YM2149)
-- SAA1099
+```
+The ZX Spectrum has only 40 keys: 0-9, A-Z, SPACE, ENTER, CAPS SHIFT and SYMBOL
+SHIFT. The ZX Spectrum+ raises this to 58, but all of the new keys function by
+pressing two existing keys simultaneously. There is no physical difference
+between pressing the new key and pressing the existing ones together.
 
-### Installation:
-Copy the *.rbf to the root folder, copy boot.rom to games/Spectrum/ on the SD card.
+This keyboard driver has been written with the general idea to have all 40
+Spectrum keys match behavior exactly, but to also have the additional keys
+behave in the most intuitive way possible. This can be boiled down to five
+overall goals:
 
-### Notes about supported formats:
-**TRD** is TR-DOS image used with Beta Disk Interface (BDI). To use TR-DOS you need to choose TRD image in OSD first. In 128K mode use menu to enter TR-DOS.
-In 48K mode use command **RANDOMIZE USR 15616** to enter TR-DOS. In +3 mode, enter to 48K mode from the +3 BASIC via the USR0 command,
-then issue **RANDOMIZE USR 15616**. Use command **RETURN** to leave TR-DOS.
+1. The A-Z, 0-9, and SPACE keys must behave exactly as they do on a real
+   Spectrum. This is the easy one.
 
-**IMG** is G+DOS image used with +D Disk interface. Although it's fully supported, i couldn't find any games on such disks. The main purpose of these images is to use snapshot function of +D and Multiface.
+2. Both Shift keys must work as CAPS SHIFT, both Ctrl keys as SYMBOL SHIFT, and
+   both Enter keys as ENTER. These keys must behave as if physically wired
+   together. I.E., the following sequence must produce a SHIFT Q:
+      Right Shift down, Left Shift down, Right Shift up, Q
 
-**MGT** is G+DOS and MasterDOS (SAM Coupe) image. It's similar to IMG but uses different layout. The main purpose is to transfer data to/from SAM Coupe.
+Note that if 1 and 2 are met, this would be a fully functional driver, as every
+Spectrum input can be accomplished. But we can do better!
+      
+3. Each additional key on the Spectrum+ keyboard that is wired to CAPS SHIFT
+   must have an analogous key. These keys must behave as if they are physically
+   wired together in the same way. In particular, pressing and releasing
+   different combinations of these keys with the keys they are wired to must
+   not cause any unexpected signals.
+   These keys have been mapped as follows:
+      BREAK        (CS+Space)  Escape
+      EXTEND MODE  (CS+SS)     Tab
+      EDIT         (CS+1)      Home
+      CAPS LOCK    (CS+2)      Caps Lock
+      TRUE VIDEO   (CS+3)      Page Up
+      INV VIDEO    (CS+4)      Page Down
+      Left Arrow   (CS+5)      Left Arrow or Numpad 4
+      Down Arrow   (CS+6)      Down Arrow or Numpad 2
+      Up Arrow     (CS+7)      Up Arrow or Numpad 8
+      Right Arrow  (CS+8)      Right Arrow or Numpad 6
+      GRAPH        (CS+9)      End
+      DELETE       (CS+0)      BACKSPACE
 
-**DSK** +3 disk format. In none- +3 modes, +D tries to mount it, however +3 disk images are not compatible with G+DOS.
-The original +3 disk drive is a single-sided single-destiny drive, but this core supports double-sided double-destiny images, too.
-An empty [DSDD image](https://github.com/MiSTer-devel/ZX-Spectrum_MISTer/tree/master/releases/dsdd720k.dsk.gz) is great for saving from Multiface.
-***Note:*** in +3 mode, both the Beta and the +3 disk drive are supported, but only one image can be mounted, so both cannot be used at the same time.
+4. Keys bearing symbols that can be produced on a Spectrum using the SYMBOL
+   SHIFT key must produce those very symbols. This means that all of the
+   following keys must act as if they are wired directly to SYMBOL SHIFT and
+   the appropriate second key:
+      -_  =+  ;:  '"(US) '@(UK)  ,<  .>  /?  #~(UK) Num/  Num*  Num-  Num+
+   For the first eight, a Shifted keypress must also send the appropriate keys.
+   Additionally, toggling Shift after pressing any of these keys must not cause
+   the Spectrum to see a different key being pressed. For example, pressing
+   Shift and ,< will send SS+R for the "<" symbol. Releasing Shift must not
+   then cause SS+N (the "," symbol) to be sent, as this is clearly not the
+   intent of the user.
 
-**TAP** is simple tape dump format. It is possible to use normal and **turbo** loading (only if application uses standard loading routines from ROM). To load in turbo mode, you need to choose TAP file in OSD **first** and then start to load app through menu (128K) or by command **LOAD ""** (48K, 128K). To load TAP file in normal mode through internal AUDIO IN loop, you need to start loading through menu or command **first** and then choose TAP file though OSD. If application uses non-standard loader, then TAP file will be played in normal mode automatically. Thus it's safe to always choose the turbo mode. Some applications are split into several parts inside one TAP file. For example DEMO apps where each part is loaded after finish of previous part, or games loading levels by requests. The core pauses the TAP playback after each code part (flag=#255). If application uses standard loader from ROM, then everything will be handled automatically and unnoticeable. If app uses non-standard loader, then there is no way to detect the loading. In this case you need to press **F1 key** to continue/pause TAP playback. Do not press F1 key while data is loading (or you will have to reset and start from beginning). To help operate with TAP (for non-standard loaders) there is special yellow LED signaling:
-- LED is ON: more data is available in TAP file.
-- LED is flashing: loading is in process.
-- LED is OFF: no more data left in TAP file.
+Many might be tempted to stop there, but this driver goes beyond!
 
-In normal mode, while TAP loading, the following keys can be used:
-- F1 - pause/continue
-- F2 - jump to previous part (if pressed while pilot tone), or beginning of current part (if pressed while code is transferring).
-- F3 - skip to next part
+5. Keys bearing symbols that can be produced on a Spectrum in EXTEND MODE must
+   produce those very symbols. This includes the following keys:
+      [{  ]}  \|  `~(US)  #~(UK)
+   The Shifted versions must work appropriately as well. Since there is no `
+   symbol on the Spectrum, this key will produce the only other extended mode
+   symbol, ©.
 
-If game uses non-standard loader, then loading usually paused after loading of first part. Press **F1** to continue loading.
+   Note that this feature is meant as a convenience only. These symbols require
+   three distinct events in order to be processed correctly:
+      SYMBOL SHIFT + CAPS SHIFT
+      Release of CAPS SHIFT
+      SYMBOL SHIFT + Key
+   Because of this, it is necessary to hold the key down long enough for all
+   three events to occur. This is done quite quickly, but will definitely be
+   noticed by fast typists. If the keypress is too short, the Spectrum will go
+   into EXTEND MODE, but will not press the appropriate symbol key afterwards.
+   Note also that these keys will result in the wrong things appearing on the
+   screen if pressed when EXTEND MODE is already active. This means repeatedly
+   pressing these keys quickly will likely produce unexpected keywords. This is
+   NOT a bug, but merely the result of the combination of the prior two points.
 
-OSD option **Fast tape load** increases CPU frequency to 56MHz while tape loading.
+Having been met, the above five goals should provide the ultimate combination
+of Spectrum-like behavior with additional functionality provided by all those
+extra keys.
 
-Use **F10** key to switch into 48K basic (won't lock 48K mode) and automatically enter **LOAD ""** if game/app doesn't load from 128K menu.
+In the above descriptions, there are a few references to (US) and (UK). This is
+because US and UK keyboard layouts differ as follows:
+    Layout         OSD Mode
+   US    UK        US    UK
+   `~    `¬        ©~    
+   '"    '@        '"    '@
+   \|    #~        \|    #~
+         \|              \|
+You should change the OSD settings to match your keyboard's layout if you want
+these keys to print what they display.
 
-### Turbo modes
-You can control CPU speed by following keys:
-- F4 - normal speed (3.5MHz)
-- F5 - 7MHz
-- F6 - 14MHz
-- F7 - 28MHz
-- F8 - 56MHz
-- F9 - pause/continue
-Speed can be controlled from OSD as well.
-
-Due to SDRAM speed limitation 28MHz and 56MHz speeds include wait states, so effective CPU speed is lower than nominal.
-
-
-### Memory Configurations with extra RAM:
-- **Pentagon 512K** uses bits 6 and 7 in port 7FFD to access additional memory.
-- **Profi 1024K** uses bits 0-2 in port DFFD to access additional memory.
-
-### Mouse and Joystick:
-Kempston mouse has no strict convention which bit (D0 or D1) reflects a main button. After each reset, the first button pressed on mouse (left or right buttons only) will be represented by bit D0 (other button will be represented by bit D1). So, if you are not satisfied by mouse button map, then simply press reset and then press other button first.
-Due to port conflict with Kempston joystick, core uses autodetection. Any mouse activity will switch port to mouse control. Any joystick activity will switch port to joystick control.
-Some games/apps autodetect the mouse. So, move the mouse or click its button before use such games/apps.
-
-### Snapshots:
-Core supports snapshot functionality of +D. In order to use it, you need to mount IMG or MGT image. ROM includes preloaded G+DOS image, thus you can mount IMG/MGT at any time (even while playing the game). **Note #1**: preloaded G+DOS has been patched to allow disk change on-the-fly. So, if you will load G+DOS from disk, then be careful - it may corrupt previous saves if you will change the disk! **Note #2:** only one disk image can be mounted at any time. Thus make sure if you use game from TRD image, the game won't save anything later to its disk. 
-
-To save snapshot using +D (preferred way), press **F11 key**. You will see stripes on border and game will freeze. You can press following keys:
-- 3 - to save the screen.
-- 4 - to save 48K snapshot.
-- 5 - to save 128K snapshot.
-Original +D ROM requires to press additional Y/N keys in 128K mode to choose the correct screen buffer. Included ROM has been pre-patched to automatically detect the screen. So, just press 5 for 128K snapshot.
-
-To load snapshot, just mount IMG/MGT and go to basic prompt where type **CAT 1** to list its content. Note the number of snapshot file. Then type **LOAD pX** where X is the number of shapshot file. For other disk commands please find and read G+DOS (MGT +D) manual.
-
-### Multiface 128 and Multiface 3:
-You can enter Multiface ROM using **RShift+F11**. Multiface 128 includes preloaded debugger (Genie) where you can trace or modify the game.
-If you prefer to use bare Multiface 128 ROM then do following procedure: Press and hold **ESC**, then press **RShift+F11**.
-You will be able to use bare Multiface ROM by simple subsequent presses of **RShift+F11** till core reload. Multiface provides snapshot functionality by saving to IMG/MGT disks. Please find and read Multiface 128 manual.
-**Note:** Multiface 128 expose its port, thus if game has protection against Multiface, it won't work, unless you press (o)ff before you exit from the Multiface menu. Thus using +D snapshot is prefered.
-When using the Spectrum +2A/3 mode, the Multiface 3 is supported. There's no Genie for the +3, but there are useful toolkit routines in the stock ROM.
-
-### DivMMC
-Supported both VHD images and secondary SD card. Default **auto** mode makes DivMMC hidden til VHD image gets selected.
-You have to get ESXDOS package, rename **ESXMMC.BIN** to **boot1.rom** and place to **games/Spectrum/**
-Make sure boot1.rom and files inside VHD (or SD card) are from the same ESXDOS version.
-
-
-### Special Keys:
-- Ctrl+F11 - warm reset
-- Alt+F11 - cold reset will disk unload
-- Ctrl+Alt+F11 - reset to ROM0 menu
-- F10 - switch to Basic 48 (without 48K lock) and issue **LOAD""**
-- RShift+F10 - same as F10 with 48K lock
-- F11 - enter +D snapshot menu (or ROM0 menu if IMG/MGT not mounted) or DivMMC file browser.
-- RShift+F11 - enter Multiface 128 menu
-- F12 - OSD menu
-
-Quick switch between models:
-- Alt+F1 - ZX Spectrum 48K (48KB, ULA-48)
-- Alt+F2 - ZX Spectrum 128K (128KB/+2, ULA-128)
-- Alt+F3 - ZX Spectrum +3 (128KB +3, ULA-128)
-- Alt+F4 - Pentagon 48K (48KB, Pentagon)
-- Alt+F5 - Pentagon 128K (128KB, Pentagon)
-- Alt+F6 - Pentagon 1024K (1024KB, Pentagon)
-CPU speed will reset to original.
+As a bonus, this driver also understands the Game Mode of the Recreated ZX
+Spectrum keyboard. As this is a completely non-standard protocol, the OSD will
+not be able to understand it at all. Qwerty Mode cannot be used because it does
+not provide signals for CAPS SHIFT and SYMBOL SHIFT. Therefore, for best
+results, you will need a second standard keyboard attached to the MiSTer to use
+for controlling the OSD or using the Function Keys.
+```
 
 ### Download precompiled binaries and system ROMs:
-Go to [releases](https://github.com/MiSTer-devel/ZX-Spectrum_MISTer/tree/master/releases) folder.
+Go to [releases](https://github.com/JulianPaoloThiry/ZX-Spectrum_MISTer/tree/master/releases) folder.
+
+All releases in this repository have a date one day after the equivalent release in the main repository. If you see
+a release with the same date as the main release, it means the code has been merged, but not yet compiled and released.
+Be patient and the "day after" release will replace that version shortly.
